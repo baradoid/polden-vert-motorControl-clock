@@ -23,6 +23,8 @@ const int butUpPin = A2;
 const int butLeftPin = A1;
 const int butRightPin = 12;
 
+//const int pinLed = 13;
+
 uint64_t lastBlinkTime=0;
 int digitBlinkInd = -1;
 
@@ -30,6 +32,7 @@ byte mcVal = 0x01;
 
 void setup() {
   fillAsciiTable();
+
   
   pinMode(pinRCK, OUTPUT); //RCK
   digitalWrite(pinRCK, LOW);    // turn the LED off by making the voltage LOW
@@ -37,7 +40,8 @@ void setup() {
   pinMode(pinMCRCK, OUTPUT); //RCK for Motro Control Shift Reg
   digitalWrite(pinMCRCK, LOW);    // turn the LED off by making the voltage LOW
   
-
+  //pinMode(pinLed, OUTPUT);
+  //digitalWrite(pinLed, HIGH);    // turn the LED off by making the voltage LOW
   //pinMode(PC6, OUTPUT); //RCK for Motro Control Shift Reg 
 //  digitalWrite(pinDebug, LOW);    // turn the LED off by making the voltage LOW
 
@@ -50,7 +54,8 @@ void setup() {
     pinMode(pinDig[i], OUTPUT); //RCK
     digitalWrite(pinDig[i], LOW);    // turn the LED off by making the voltage LOW
   }
-     
+
+  SPSR = 0x01;
   SPI.begin();
   Wire.begin();    
   
@@ -76,28 +81,38 @@ void setup() {
   
   Serial.begin(19200);  // start serial for output
 
-  Timer1.initialize(5);         // initialize timer1, and set a 1/2 second period 
+  Timer1.initialize(10);     
   Timer1.attachInterrupt(callback);  // attaches callback() as a timer overflow interrupt
 }
 
 byte counter; 
+
+volatile byte motor1Val = 0x4;
+int motor1Cnt = 0;
 void callback()
 {   
-  PORTC |= 0x08;
-  SPDR = mcVal;
-  counter++;
-
-  if((counter&0x01) == 0){
-    mcVal = 0x01;            
-  }
-  else{
-    mcVal = 0x00;        
-  }
+  //PORTC |= 0x08;
+  //SPDR = mcVal;
   
+  counter++;  
+  if(motor1Cnt == 0){
+    //mcVal = 0x01;  
+    SPDR = 0x01;
+    motor1Cnt = motor1Val;
+  }   
+  else{
+    motor1Cnt--;                    
+  }
+
   //SPI.transfer(mcVal);
   
-     
-//  PORTC |= 0x08;
+  while (!(SPSR & _BV(SPIF))) ; // wait     
+  PORTC |= 0x08;
+  PORTC &= ~0x08;
+  
+  SPDR = 0x0;
+  while (!(SPSR & _BV(SPIF))) ; // wait      
+  PORTC |= 0x08;
   PORTC &= ~0x08;
   
   
@@ -141,6 +156,15 @@ int cashCount = 0;
 char dispArr[8];
 int curDig = 0;
 
+uint64_t lastMotorControlTime = 0;
+
+
+typedef enum{
+  speedUp,
+  speedDown
+} TMotorControlState;
+
+TMotorControlState mcState = speedUp;
 
 void loop() {
   for(int i=0; i<8; i++){
@@ -240,7 +264,41 @@ void loop() {
   //setMCVal(mcVal);
 
   //processCC();
+
+
+  if((millis()- lastMotorControlTime) > 250){
+    lastMotorControlTime = millis();    
+    //Serial.println("ctrl");
+    Serial.println(motor1Val);
+//    digitalWrite(pinLed, !digitalRead(pinLed));   
+    switch(mcState){
+      case speedUp:
+        //motor1Val = 0;
+        //mcState = speedDown;         
+        
+        if(motor1Val == 0){
+          mcState = speedDown;         
+        }
+        else{
+          motor1Val--;
+        }
+         
+        break;
+      case speedDown:
+        //motor1Val = 0x20;
+        //mcState = speedUp;  
+        if(motor1Val == 0x30){
+          mcState = speedUp;         
+        }
+        else{
+          motor1Val++;
+        }
+
+        break;   
+    }   
+  }   
 }
+
 
 void setDigit(int dn, uint8_t ch)
 {
@@ -256,165 +314,7 @@ void setMCVal(int val)
   //digitalWrite(pinMCRCK, HIGH);     
   //digitalWrite(pinMCRCK, LOW);  
 }
-
-
-  
-
-void processCC()
-{
-  int rb = 0;
-  switch(ccExchState){
-    case idleExchState:
-      if(((millis() - lastBVPollTime) > 200) && (Serial.availableForWrite())){        
-        lastBVPollTime = millis();
-
-        if(ccState == powerUpState){
-          iCurInd = 0;
-          iBytesToTransfer = 6;
-          sendArr = &(resetReqArr[0]);               
-          ccExchState = sendState;  
-          ccState = unknownState;         
-        }
-        else if(ccState == disableState){  
-          iCurInd = 0;
-          iBytesToTransfer = 12;
-          sendArr = &(writeBillTypeArr[0]);               
-          ccExchState = sendState;        
-          ccState = unknownState;                  
-        }
-        else{
-          iCurInd = 0;
-          iBytesToTransfer = 6;
-          sendArr = &(pollReqArr[0]);               
-          ccExchState = sendState;    
-        }
-      }
-      else if(Serial.available()){
-        int rb = Serial.read();                   
-        if (rb == 0x02){
-          ccExchState = readState0;
-        }        
-      }
-    break;
-    
-    case readState0:
-      rb = Serial.read();
-      if(rb != -1){
-        if(rb == 0x03){
-          ccExchState = readState1;       
-        }
-        else{
-          ccExchState = idleExchState;
-        }      
-      }
-    break;
-
-    case readState1: 
-      rb = Serial.read();
-      if(rb != -1){
-        iBytesToTransfer = rb-3;
-        iCurInd = 0;
-        ccExchState = readDataState;   
-//        dispArr[7] = digTable[iBytesToTransfer&0xf];
-//        dispArr[6] = digTable[(iBytesToTransfer&0xf0)>>4];      
-//        dispArr[5] = digTable[0];
-//        dispArr[4] = digTable[0];           
-  
-      }
-    break;
-
-    case readDataState:
-      rb = Serial.read();
-      if(rb != -1){     
-        data[iCurInd++] = rb;
-        //bToRead--;
-        if((iCurInd == iBytesToTransfer)){
-          ccExchState = idleExchState; 
-          if(iBytesToTransfer == 0x03){
-            if(data[0]==0x10){  //power up state                     
-              ccState = powerUpState;
-              ccExchState = sendAckState;
-            }  
-            else if(data[0]==0x13){  //init state                     
-              ccState = initState;
-              ccExchState = sendAckState;
-            }     
-            else if(data[0]==0x19){  //disable state                     
-              ccState = disableState;
-              ccExchState = sendAckState;
-            } 
-            else if(data[0]==0x14){  //idle state                     
-              ccState = idleState;
-              ccExchState = sendAckState;            
-            }
-            else if(data[0]==0x15){  //accepting state                     
-              ccState = acceptingState;
-              ccExchState = sendAckState;   
-              dispArr[0] = asciiTable['A'];
-              dispArr[1] = asciiTable['C'];
-              dispArr[2] = asciiTable['C'];
-              dispArr[3] = asciiTable['0'];                  
-            }
-            else if(data[0]==0x17){  //stacking state                     
-              ccState = stackingState;
-              ccExchState = sendAckState;                                    
-              dispArr[0] = asciiTable['A'];
-              dispArr[1] = asciiTable['C'];
-              dispArr[2] = asciiTable['C'];
-              dispArr[3] = asciiTable['1'];                  
-            }
-
-
-          }
-          else if(iBytesToTransfer == 0x04){
-            if(data[0]==0x81){      //rubls packed
-              if(data[1]==0x02)
-                cashCount +=10;
-              if(data[1]==0x03)
-                cashCount +=50;
-              if(data[1]==0x04)
-                cashCount +=100; 
-
-              iCurInd = 0;
-              iBytesToTransfer = 6;
-              sendArr = &(ackArr [0]);               
-              ccExchState = sendState;
-            } 
-            else if(data[0]==0x1c){  //rejecting state                    
-              ccState = rejectingState;
-              ccExchState = sendAckState;   
-            }           
-          }
-          dispArr[7] = digTable[(cashCount%10)&0xf];
-          dispArr[6] = digTable[(int)(cashCount/10)%10];      
-          dispArr[5] = digTable[(int)(cashCount/100)%10];
-          dispArr[4] = digTable[(int)(cashCount/1000)%10];
-        }              
-      }                  
-              
-    break;
-
-    case sendAckState:
-      iCurInd = 0;
-      iBytesToTransfer = 6;
-      sendArr = &(ackArr [0]);                            
-      ccExchState = sendState;
-    break;
-
-    case sendState:
-    if(Serial.availableForWrite()){
-      Serial.write(sendArr[iCurInd++]);  
-      //iCurInd++;
-      if((iCurInd == iBytesToTransfer)){
-        ccExchState = idleExchState; 
-      }
-    }
-    break;
-
-  }
  
-}
-
 
 
 void fillAsciiTable()
