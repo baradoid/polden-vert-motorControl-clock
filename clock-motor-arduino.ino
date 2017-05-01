@@ -212,7 +212,7 @@ void loop() {
   if(curDig > 7)
     curDig = 0;  
      
-  if((millis()-lastRTCPollTime) > 1000){
+  if((millis()-lastRTCPollTime) > 3000){
     lastRTCPollTime = millis();
       
     Wire.beginTransmission(0x68); // transmit to device #9
@@ -409,10 +409,16 @@ void loop() {
     dispArr[4] = digTable[(int)(pos7seg[0]/1000)%10];
   }
   else{
+    
     dispArr[7] = 0;
     dispArr[6] = 0;
     dispArr[5] = 0;
     dispArr[4] = 0;
+
+//    dispArr[3] = 0;
+//    dispArr[2] = 0;
+//    dispArr[1] = 0;
+//    dispArr[0] = 0;
   }
       
   if((millis()- lastMotorControlTime) > 250){
