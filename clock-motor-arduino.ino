@@ -134,7 +134,7 @@ void setup() {
     
   }
   //Timer1.initialize(30);     
-  Timer1.initialize(30);     
+  Timer1.initialize(100);     
   Timer1.attachInterrupt(callback);  // attaches callback() as a timer overflow interrupt
 }
 
