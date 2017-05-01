@@ -30,6 +30,46 @@ int digitBlinkInd = -1;
 
 byte mcVal = 0x01;
 
+#define driveCount 2
+
+#define motorLowestSpeed 252
+
+typedef enum{
+  idle,
+  speedUp,
+  speedIdle,
+  speedDown,
+  dirChange
+} TMotorControlState;
+
+typedef struct{
+  TMotorControlState state;
+  byte maxSpeed;
+  byte speedUpEndPos;
+  byte speedDownStartPos;
+  byte speedInc;
+  bool bCont;
+  uint32_t contPos;
+    
+} TMotorStatus;
+
+
+volatile byte motorVal[driveCount];
+byte motorCnt[driveCount];
+volatile uint32_t motorPos[driveCount];
+volatile byte motorDir[driveCount];
+
+volatile TMotorStatus mcStatus[driveCount];
+
+
+String inString = ""; 
+
+
+int cashCount = 0;
+
+char dispArr[8];
+int curDig = 0;
+
 void setup() {
   fillAsciiTable();
 
@@ -81,29 +121,48 @@ void setup() {
   
   Serial.begin(19200);  // start serial for output
 
-  Timer1.initialize(10);     
+  for(int i=0; i<driveCount; i++){
+    motorVal[i]=3;
+    motorCnt[i]=0;
+    motorPos[i]=0;
+    mcStatus[driveCount].state = speedIdle;
+    mcStatus[driveCount].maxSpeed = 0;
+    mcStatus[driveCount].speedUpEndPos = 0;
+    mcStatus[driveCount].speedDownStartPos = 0;
+    mcStatus[driveCount].speedInc = 0;
+    mcStatus[driveCount].bCont = false;
+    
+  }
+  //Timer1.initialize(30);     
+  Timer1.initialize(30);     
   Timer1.attachInterrupt(callback);  // attaches callback() as a timer overflow interrupt
 }
 
-byte counter; 
 
-volatile byte motor1Val = 0x4;
-int motor1Cnt = 0;
+volatile byte spiVal = 0; 
 void callback()
 {   
   //PORTC |= 0x08;
   //SPDR = mcVal;
   
-  counter++;  
-  if(motor1Cnt == 0){
-    //mcVal = 0x01;  
-    SPDR = 0x01;
-    motor1Cnt = motor1Val;
-  }   
-  else{
-    motor1Cnt--;                    
+  SPDR = spiVal;
+  spiVal = 0;
+  for(int i=0; i<driveCount; i++){
+    if(motorCnt[i] == 0){
+      if(motorPos[i] > 0 ){        
+        spiVal |= (1<<(2*i));
+        spiVal |= (motorDir[i]<<(2*i+1));        
+        motorCnt[i] = motorVal[i];
+        motorPos[i]--;
+      }
+    }   
+    else{
+      motorCnt[i]--;                    
+    } 
+       
   }
 
+  
   //SPI.transfer(mcVal);
   
   while (!(SPSR & _BV(SPIF))) ; // wait     
@@ -114,65 +173,41 @@ void callback()
   while (!(SPSR & _BV(SPIF))) ; // wait      
   PORTC |= 0x08;
   PORTC &= ~0x08;
-  
+
+
+//  for(int i=0; i<8; i++){
+//    digitalWrite(pinDig[i], LOW);    // turn the LED off by making the voltage LOW
+//  }  
+//  
+//  //setDigit(curDig, dispArr[curDig]);
+//  SPI.transfer(dispArr[curDig]);
+//  digitalWrite(pinRCK, HIGH);
+//  digitalWrite(pinDig[curDig], HIGH);    // turn the LED off by making the voltage LOW 
+//  digitalWrite(pinRCK, LOW); 
+//    
+//  curDig++;
+//  if(curDig > 7)
+//    curDig = 0;  
   
 }
 
-typedef enum{
-  unknownState,
-  powerUpState,
-  idleState,
-  initState,
-  disableState,
-  acceptingState,
-  stackingState,
-  rejectingState,
-} TCashCodeState;
 
-typedef enum{
-  idleExchState,
-  readState0,
-  readState1,
-  readDataState,
-  sendState,
-  sendAckState  
-} TCashCodeExchState;
-
-//TCashCodeState 
-TCashCodeState  ccState = unknownState;
-TCashCodeExchState ccExchState = idleExchState;
-uint64_t lastBVPollTime=0;
-int iBytesToTransfer = 0;
-int iCurInd = 0;
-int data[60];
-byte pollReqArr[] = {0x02, 0x03, 0x06, 0x33, 0xda, 0x81};
-byte resetReqArr[] = {0x02, 0x03, 0x06, 0x30, 0x41, 0xb3};
-byte writeBillTypeArr[] = {0x02, 0x03, 0x0C, 0x34, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0xb5, 0xc1};
-byte ackArr[] = {0x02, 0x03, 0x06, 0x00, 0xc2, 0x82};
-byte *sendArr;
-
-int cashCount = 0;
-
-char dispArr[8];
-int curDig = 0;
 
 uint64_t lastMotorControlTime = 0;
 
 
-typedef enum{
-  speedUp,
-  speedDown
-} TMotorControlState;
 
-TMotorControlState mcState = speedUp;
+
 
 void loop() {
+  
   for(int i=0; i<8; i++){
     digitalWrite(pinDig[i], LOW);    // turn the LED off by making the voltage LOW
-  }  
-  
+  }                                   //const int pinDig[] = {9, 8, 7, 6, 5, 4, 3, 2};    
+  noInterrupts();
   setDigit(curDig, dispArr[curDig]);
-    
+  interrupts();    
+  
   curDig++;
   if(curDig > 7)
     curDig = 0;  
@@ -264,48 +299,191 @@ void loop() {
   //setMCVal(mcVal);
 
   //processCC();
+  if(readSerial() == true){
+    if(inString.startsWith("p") == true){
+      Serial.println(inString);  
+      inString.remove(0, 1);    
+      //Serial.println(inString);  
+      int mcInd = inString.substring(0, 2).toInt();      
+      inString.remove(0, 3);
+      //Serial.println(inString);  
+      
+      uint32_t motorPosLoc = inString.toInt();
+      uint32_t motorPosLocDivThr = (motorPosLoc/4)<4000 ? (motorPosLoc/4) : 4000;            
+      mcStatus[mcInd].speedUpEndPos = motorPosLoc - motorPosLocDivThr;
+      mcStatus[mcInd].speedDownStartPos = motorPosLoc + motorPosLocDivThr;
+      mcStatus[mcInd].speedInc = 63;
+      //motorVal[mcInd] = motorLowestSpeed;
+      mcStatus[mcInd].state = speedUp;      
+      
+      motorPos[mcInd] = motorPosLoc;      
+    }   
+    else if(inString.startsWith("v") == true){
+      Serial.println(inString);  
+      inString.remove(0, 1);    
+      //Serial.println(inString);  
+      int mcInd = inString.substring(0, 2).toInt();      
+      inString.remove(0, 3);
+      //Serial.println(inString);  
+      motorVal[mcInd] = inString.toInt();
+      mcStatus[mcInd].maxSpeed = inString.toInt();
+    }   
+    else if(inString.startsWith("d") == true){
+      Serial.println(inString);  
+      inString.remove(0, 1);    
+      //Serial.println(inString);  
+      int mcInd = inString.substring(0, 2).toInt();      
+      inString.remove(0, 3);
+      //Serial.println(inString);  
+      motorDir[mcInd] = inString.toInt();      
+    } 
+    else if(inString.startsWith("r") == true){
+      Serial.println(inString);  
+      inString.remove(0, 1);    
+      //Serial.println(inString);  
+      int mcInd = inString.substring(0, 2).toInt();      
+      inString.remove(0, 3);
+      //Serial.println(inString);  
+      mcStatus[mcInd].contPos = inString.toInt();      
+    }     
+    else if(inString.startsWith("c") == true){
+      Serial.println(inString);  
+      inString.remove(0, 1);    
+      //Serial.println(inString);  
+      int mcInd = inString.substring(0, 2).toInt();      
+      inString.remove(0, 3);
+      //Serial.println(inString); 
+       
+      mcStatus[mcInd].bCont = !mcStatus[mcInd].bCont;
+      if(mcStatus[mcInd].bCont == true ){
+        motorPos[mcInd] = mcStatus[mcInd].contPos;      
+        mcStatus[mcInd].state = speedIdle;
+      }
+      else{
+        mcStatus[mcInd].state = idle;
+        
+      }
+    }   
+    inString = ""; 
+  }
 
 
+  int pos7seg = 0;
+  for(int i=0; i<driveCount; i++){
+    if(motorPos[i]>0){
+      int motorPosDiv4 = motorPos[i]/4;
+      if(motorPosDiv4 > 99999){
+        pos7seg = motorPosDiv4/100;        
+      }
+      else if(motorPosDiv4 > 9999){
+        pos7seg = motorPosDiv4/10;        
+      } 
+      else{
+        pos7seg = motorPosDiv4;                   
+      }
+      
+      break;
+    }
+    else{
+      pos7seg = 0;     
+    }        
+  }  
+  if(pos7seg>0){
+    dispArr[7] = digTable[(pos7seg%10)&0xf];
+    dispArr[6] = digTable[(int)(pos7seg/10)%10];      
+    dispArr[5] = digTable[(int)(pos7seg/100)%10];
+    dispArr[4] = digTable[(int)(pos7seg/1000)%10];
+  }
+  else{
+    dispArr[7] = 0;
+    dispArr[6] = 0;
+    dispArr[5] = 0;
+    dispArr[4] = 0;
+  }
+      
   if((millis()- lastMotorControlTime) > 250){
     lastMotorControlTime = millis();    
     //Serial.println("ctrl");
-    Serial.println(motor1Val);
-//    digitalWrite(pinLed, !digitalRead(pinLed));   
-    switch(mcState){
-      case speedUp:
-        //motor1Val = 0;
-        //mcState = speedDown;         
-        
-        if(motor1Val == 0){
-          mcState = speedDown;         
-        }
-        else{
-          motor1Val--;
-        }
-         
-        break;
-      case speedDown:
-        //motor1Val = 0x20;
-        //mcState = speedUp;  
-        if(motor1Val == 0x30){
-          mcState = speedUp;         
-        }
-        else{
-          motor1Val++;
-        }
+    for(int i=0; i<driveCount; i++){
+      Serial.print(motorPos[i]);
+      Serial.print("[");
+      Serial.print(motorVal[i]);
+      Serial.print(",");
+      Serial.print(motorDir[i]);
+      Serial.print(",");
+      Serial.print(mcStatus[i].state);
+      Serial.print("]");
+      Serial.print(" ");
 
-        break;   
-    }   
-  }   
+      
+
+
+      switch(mcStatus[i].state){
+        case idle:
+        break;
+//        case speedUp:    
+//          //motor1Val = 0;
+//          //mcState = speedDown;         
+//  
+//          if(motorPos[i] > mcStatus[i].speedUpEndPos){
+//            if(motorVal[i] == mcStatus[i].maxSpeed){
+//              mcStatus[i].state = speedIdle;         
+//            }
+//            else{
+//              motorVal[i]-=mcStatus[i].speedInc;
+//            }
+//            
+//          }
+//          else{
+//             mcStatus[i].state = speedIdle;                   
+//          }
+//           
+//          break;
+//  
+          case speedIdle:
+//          if(motorVal[i] == motorLowestSpeed){}
+//          else{
+//            if(motorPos[i] < mcStatus[i].speedDownStartPos){        
+//              mcStatus[i].state = speedDown;
+//            }
+//          }
+            if(mcStatus[i].bCont && (motorPos[i] == 0))
+              mcStatus[i].state = dirChange;
+            
+          break;
+//          
+//        case speedDown:
+//          if(motorVal[i] == motorLowestSpeed){
+//           mcStatus[i].state = speedIdle;         
+//          }
+//          else{
+//            motorVal[i]+=mcStatus[i].speedInc;
+//          }
+//  
+//          break;   
+          case dirChange:
+            motorDir[i] ^= 0x1;
+            motorPos[i] =  mcStatus[i].contPos;
+            mcStatus[i].state = speedIdle;
+          break;
+      }
+    
+    }
+    Serial.println(" ");
+//    digitalWrite(pinLed, !digitalRead(pinLed));   
+       
+  }
+
+
 }
 
 
 void setDigit(int dn, uint8_t ch)
 {
-  //SPI.transfer(ch);
-  //digitalWrite(pinRCK, HIGH);
-  //digitalWrite(pinDig[dn], HIGH);    // turn the LED off by making the voltage LOW 
-  //digitalWrite(pinRCK, LOW); 
+  SPI.transfer(ch);
+  digitalWrite(pinRCK, HIGH);
+  digitalWrite(pinDig[dn], HIGH);    // turn the LED off by making the voltage LOW 
+  digitalWrite(pinRCK, LOW); 
 }
 
 void setMCVal(int val)
@@ -327,6 +505,28 @@ void fillAsciiTable()
   asciiTable['0'] = 0x3f;
   asciiTable['1'] = 0x06;
   
+}
+
+
+bool readSerial()
+{  
+  bool ret = false;
+  while (Serial.available() > 0) {
+    int inChar = Serial.read();
+    //if (isDigit(inChar)) {
+      // convert the incoming byte to a char
+      // and add it to the string:
+      inString += (char)inChar;
+    //}
+
+    if (inChar == '\n') {
+      //andrCpuTemp = inString.toInt();
+      //inString = "";
+      ret = true;
+      break;              
+    }        
+  }
+  return ret;
 }
 
 
