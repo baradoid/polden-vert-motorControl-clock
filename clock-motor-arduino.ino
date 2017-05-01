@@ -108,10 +108,10 @@ void setup() {
 //  Wire.write(0x2);   
 //  Wire.endTransmission(); // stop transmitting
 
-//  Wire.beginTransmission(0x68); // transmit to device #9
-//  Wire.write(0x01); 
-//  Wire.write(0x25);   
-//  Wire.endTransmission(); // stop transmitting
+  //Wire.beginTransmission(0x68); // transmit to device #9
+  //Wire.write(0x01); 
+  //Wire.write(0x30);   
+  //Wire.endTransmission(); // stop transmitting
 //
 //  Wire.beginTransmission(0x68); // transmit to device #9
 //  Wire.write(0x02); 
@@ -368,31 +368,45 @@ void loop() {
   }
 
 
-  int pos7seg = 0;
-  for(int i=0; i<driveCount; i++){
+  int pos7seg[2] = {0, 0};  
+  for(int i=0; i<2; i++){
     if(motorPos[i]>0){
       int motorPosDiv4 = motorPos[i]/4;
       if(motorPosDiv4 > 99999){
-        pos7seg = motorPosDiv4/100;        
+        pos7seg[i] = motorPosDiv4/100;        
       }
       else if(motorPosDiv4 > 9999){
-        pos7seg = motorPosDiv4/10;        
+        pos7seg[i] = motorPosDiv4/10;        
       } 
       else{
-        pos7seg = motorPosDiv4;                   
+        pos7seg[i] = motorPosDiv4;                   
       }
       
       break;
     }
     else{
-      pos7seg = 0;     
+      pos7seg[i] = 0;     
     }        
   }  
-  if(pos7seg>0){
-    dispArr[7] = digTable[(pos7seg%10)&0xf];
-    dispArr[6] = digTable[(int)(pos7seg/10)%10];      
-    dispArr[5] = digTable[(int)(pos7seg/100)%10];
-    dispArr[4] = digTable[(int)(pos7seg/1000)%10];
+  if((pos7seg[0]>0) && (pos7seg[1]>0)){
+    dispArr[7] = digTable[(pos7seg[0]%10)&0xf];
+    dispArr[6] = digTable[(int)(pos7seg[0]/10)%10];      
+    dispArr[5] = digTable[(int)(pos7seg[0]/100)%10];
+    dispArr[4] = digTable[(int)(pos7seg[0]/1000)%10];    
+
+    dispArr[3] = digTable[(pos7seg[1]%10)&0xf];
+    dispArr[2] = digTable[(int)(pos7seg[1]/10)%10];      
+    dispArr[1] = digTable[(int)(pos7seg[1]/100)%10];
+    dispArr[0] = digTable[(int)(pos7seg[1]/1000)%10];    
+
+  }
+  else if((pos7seg[0]>0) || (pos7seg[1]>0) ){
+    if(pos7seg[1]>0) 
+      pos7seg[0] = pos7seg[1];
+    dispArr[7] = digTable[(pos7seg[0]%10)&0xf];
+    dispArr[6] = digTable[(int)(pos7seg[0]/10)%10];      
+    dispArr[5] = digTable[(int)(pos7seg[0]/100)%10];
+    dispArr[4] = digTable[(int)(pos7seg[0]/1000)%10];
   }
   else{
     dispArr[7] = 0;
